@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db'); // to jest Pool z `pg`
+const supabase = require('../db'); // zaktualizowany db.js z createClient
 
 function generateCode(length = 6) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -13,36 +13,25 @@ function generateCode(length = 6) {
 
 // Pobierz wszystkie listy
 router.get('/', async (req, res) => {
-  try {
-    const result = await db.query('SELECT * FROM lists');
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const { data, error } = await supabase.from('lists').select('*');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 // Pobierz listę po ID
 router.get('/:id', async (req, res) => {
-  const listId = req.params.id;
-  try {
-    const result = await db.query('SELECT * FROM lists WHERE id = $1', [listId]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Lista nie znaleziona' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const { id } = req.params;
+  const { data, error } = await supabase.from('lists').select('*').eq('id', id).single();
+  if (error) return res.status(404).json({ error: 'Lista nie znaleziona' });
+  res.json(data);
 });
 
 // Pobierz listę po kodzie
 router.get('/code/:code', async (req, res) => {
-  const code = req.params.code;
-  try {
-    const result = await db.query('SELECT * FROM lists WHERE code = $1', [code]);
-    if (result.rows.length === 0) return res.status(404).json({ error: 'Lista nie znaleziona' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const { code } = req.params;
+  const { data, error } = await supabase.from('lists').select('*').eq('code', code).single();
+  if (error) return res.status(404).json({ error: 'Lista nie znaleziona' });
+  res.json(data);
 });
 
 // Dodaj nową listę
@@ -51,53 +40,55 @@ router.post('/', async (req, res) => {
   if (!name) return res.status(400).json({ error: "Pole 'name' jest wymagane" });
 
   const code = generateCode();
-  try {
-    const result = await db.query(
-      'INSERT INTO lists (name, code) VALUES ($1, $2) RETURNING id',
-      [name, code]
-    );
-    res.json({ id: result.rows[0].id, name, code });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+
+  const { data, error } = await supabase
+    .from('lists')
+    .insert([{ name, code }])
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 // Pobierz przedmioty z listy
 router.get('/:id/items', async (req, res) => {
-  const listId = req.params.id;
-  try {
-    const result = await db.query('SELECT * FROM items WHERE list_id = $1', [listId]);
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  const { id } = req.params;
+  const { data, error } = await supabase.from('items').select('*').eq('list_id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
-// Dodaj przedmiot
+// Dodaj przedmiot do listy
 router.post('/:id/items', async (req, res) => {
   const listId = req.params.id;
   const { name, timestamp } = req.body;
-  try {
-    const result = await db.query(
-      'INSERT INTO items (list_id, name, timestamp) VALUES ($1, $2, $3) RETURNING id',
-      [listId, name, timestamp]
-    );
-    res.json({ id: result.rows[0].id });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+
+  const { data, error } = await supabase
+    .from('items')
+    .insert([{ list_id: listId, name, timestamp }])
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ id: data.id });
 });
 
-// Usuń przedmiot
+// Usuń przedmiot po ID
 router.delete('/items/:id', async (req, res) => {
   const itemId = req.params.id;
-  try {
-    const result = await db.query('DELETE FROM items WHERE id = $1', [itemId]);
-    if (result.rowCount === 0) return res.status(404).json({ error: 'Produkt nie znaleziony' });
-    res.json({ message: 'Usunięto' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+
+  const { error, count } = await supabase
+    .from('items')
+    .delete()
+    .eq('id', itemId)
+    .select()
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+  if (!count) return res.status(404).json({ error: 'Produkt nie znaleziony' });
+
+  res.json({ message: 'Usunięto' });
 });
 
 module.exports = router;
