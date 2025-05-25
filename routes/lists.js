@@ -1,8 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db');
+const db = require('../db'); // to jest Pool z `pg`
 
-// Funkcja do generowania unikalnego kodu (6 znaków)
 function generateCode(length = 6) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
@@ -13,90 +12,92 @@ function generateCode(length = 6) {
 }
 
 // Pobierz wszystkie listy
-router.get('/', (req, res) => {
-  db.query('SELECT * FROM lists', (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+router.get('/', async (req, res) => {
+  try {
+    const result = await db.query('SELECT * FROM lists');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Pobierz listę o danym ID
-router.get('/:id', (req, res) => {
+// Pobierz listę po ID
+router.get('/:id', async (req, res) => {
   const listId = req.params.id;
-  db.query('SELECT * FROM lists WHERE id = ?', [listId], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (rows.length === 0) return res.status(404).json({ error: 'Lista nie znaleziona' });
-    res.json(rows[0]);
-  });
+  try {
+    const result = await db.query('SELECT * FROM lists WHERE id = $1', [listId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Lista nie znaleziona' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Pobierz listę po kodzie
-router.get('/code/:code', (req, res) => {
+router.get('/code/:code', async (req, res) => {
   const code = req.params.code;
-  db.query('SELECT * FROM lists WHERE code = ?', [code], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (rows.length === 0) return res.status(404).json({ error: "Lista nie znaleziona" });
-    res.json(rows[0]);
-  });
+  try {
+    const result = await db.query('SELECT * FROM lists WHERE code = $1', [code]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Lista nie znaleziona' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Dodaj nową listę z generowaniem unikalnego kodu
-router.post('/', (req, res) => {
+// Dodaj nową listę
+router.post('/', async (req, res) => {
   const { name } = req.body;
+  if (!name) return res.status(400).json({ error: "Pole 'name' jest wymagane" });
 
-  if (!name) {
-    return res.status(400).json({ error: "Pole 'name' jest wymagane" });
-  }
-
-  // Generowanie kodu
   const code = generateCode();
-
-  // Opcjonalnie: tu możesz dodać pętlę lub logikę, żeby upewnić się, że kod jest unikalny
-  // Dla uproszczenia pomijamy to teraz
-
-  db.query('INSERT INTO lists (name, code) VALUES (?, ?)', [name, code], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ id: result.insertId, name, code });
-  });
+  try {
+    const result = await db.query(
+      'INSERT INTO lists (name, code) VALUES ($1, $2) RETURNING id',
+      [name, code]
+    );
+    res.json({ id: result.rows[0].id, name, code });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Pobierz przedmioty z listy
-router.get('/:id/items', (req, res) => {
+router.get('/:id/items', async (req, res) => {
   const listId = req.params.id;
-  db.query('SELECT * FROM items WHERE list_id = ?', [listId], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(rows);
-  });
+  try {
+    const result = await db.query('SELECT * FROM items WHERE list_id = $1', [listId]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Dodaj przedmiot do listy
-router.post('/:id/items', (req, res) => {
+// Dodaj przedmiot
+router.post('/:id/items', async (req, res) => {
   const listId = req.params.id;
   const { name, timestamp } = req.body;
-  db.query(
-    'INSERT INTO items (list_id, name, timestamp) VALUES (?, ?, ?)',
-    [listId, name, timestamp],
-    (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({ id: result.insertId });
-    }
-  );
+  try {
+    const result = await db.query(
+      'INSERT INTO items (list_id, name, timestamp) VALUES ($1, $2, $3) RETURNING id',
+      [listId, name, timestamp]
+    );
+    res.json({ id: result.rows[0].id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Usuń pojedynczy produkt po ID
-router.delete('/items/:id', (req, res) => {
+// Usuń przedmiot
+router.delete('/items/:id', async (req, res) => {
   const itemId = req.params.id;
-
-  db.query('DELETE FROM items WHERE id = ?', [itemId], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Produkt nie znaleziony' });
-    }
-
+  try {
+    const result = await db.query('DELETE FROM items WHERE id = $1', [itemId]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Produkt nie znaleziony' });
     res.json({ message: 'Usunięto' });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
-
 
 module.exports = router;
